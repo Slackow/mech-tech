@@ -1,0 +1,176 @@
+var machine_list = [
+#ignore this comment, this is for highlighting fixing]
+	 {
+		id: {
+			str: 'coal_generator',
+			num: 1
+		},
+		block: 'dropper[facing=up]{CustomName:\'"Coal Generator"\'}',
+		type: 'gen',
+		rate: 40,
+		max_capacity: 10000,
+		has_special_display: true,
+		tick: () ->  {
+			/execute if score @s timer matches 0 run $function  {
+				var value = [{type: 'coal', time: 5}, {type:'charcoal', time:5}, {type:'coal_block', time:50}];
+				/execute store result score t global run data get block ~ ~-1 ~ Items
+				/execute if score t global matches 1 run $function  {
+					/execute if data Items[{id:"minecraft:coal"}] run $function  {
+						/scoreboard players set @s timer 100
+						/execute store result score count global run data get block ~ ~-1 ~ Items[0].Count
+						/scoreboard players remove count global 1
+						/execute store result block ~ ~-1 ~ Items[0].Count byte 1 run scoreboard players get count global
+					}
+				}
+			}
+		}
+	},
+	{
+		id: {
+			str: 'basic_capacitor',
+			num: 3
+		},
+		block: 'jukebox',
+		type: 'cell',
+		rate: 100,
+		max_capacity: 100000,
+		has_special_display: false
+	},
+	{
+		id: {
+			str: 'advanced_capacitor',
+			num: 4
+		},
+		block: 'jukebox',
+		type: 'cell',
+		rate: 500,
+		max_capacity: 500000,
+		has_special_display: false
+	},
+	{
+		id: {
+			str: 'ultimate_capacitor',
+			num: 5
+		},
+		block: 'jukebox',
+		type: 'cell',
+		rate: 2000,
+		max_capacity: 2500000,
+		has_special_display: false
+	}
+];
+
+
+
+var at_location = 'distance=..0.0001,limit=1,sort=nearest';
+gen function 'load' {
+	/scoreboard objectives add energy dummy "Energy"
+	/scoreboard objectives add timer dummy "Timer"
+	/scoreboard objectives add global dummy "Global"
+	/scoreboard objectives add max_capacity dummy "Max Capacity"
+	/scoreboard objectives add rate dummy "Rate"
+	/scoreboard objectives add place_machine minecraft.used:minecraft.white_banner "Place_Machine"
+	/scoreboard objectives add who_placed dummy "Person who Placed"
+	/scoreboard players set 100 global 100
+	/scoreboard players set 20 global 20
+	/tellraw @a "Reloaded"
+}
+
+
+for machine in machine_list  {
+	var string_id = machine.id.str;
+	var num_id = machine.id.num;
+	gen function 'minecraft:give_machine/$string_id' {
+			//give @s
+			white_banner{
+				CustomModelData:$num_id,
+				display:{Name:'{"translate":"mech_tech.$string_id.name","italic":false}'},
+				BlockEntityTag:{Patterns:[{Pattern:"$string_id",Color:$num_id}]},
+			}
+			//
+	}
+	gen function 'create/$string_id' {
+		/setblock ~ ~-1 ~ ${machine.block}
+
+		/execute as @p[scores={who_placed=1..}] run $function  {
+			for direction in [['-45..45','if',180], ['-135..-45','if',90], ['45..135','if',-90], ['-135..135','unless',0]]  {
+				var range = direction[0];
+				var machine_dir = direction[2];
+				//execute ${direction[1]} entity @s[y_rotation=$range] run summon armor_stand ~ ~ ~ {
+					Fire:32767s,
+					Rotation:[${machine_dir}f,0f],
+					CustomName:'{"translate":"mech_tech.$string_id.name"}',
+					Invisible:1b,
+					NoGravity:1b,
+					Marker:1b,
+					ArmorItems:[{},{},{},{id:"minecraft:white_banner",tag:{CustomModelData:${machine.id.num}},Count:1b}],
+					Tags:["tick","tech","$string_id","${machine.type}"]
+				}
+				//
+				/execute as @e[$at_location] run $function  {
+					/scoreboard players set @s rate ${machine.rate / 20}
+					/scoreboard players set @s max_capacity ${machine.max_capacity}
+					/scoreboard players set @s energy 0
+				}
+			}
+			/scoreboard players reset @s who_placed
+		}
+	}
+
+/execute as @a at @s run $function 'player' {
+	/execute if score @s place_machine matches 1.. run $function 'on_place_machine' {
+		/scoreboard players set @s who_placed 1
+		for machine in machine_list  {
+			#fills
+			//execute anchored eyes run fill ^ ^ ^-0.5 ^ ^ ^4
+			command_block{Command:"execute positioned ~ ~.5 ~ run function mech_tech:create/${machine.id.str}",auto:1b}
+			replace #white_banner{Patterns:[{Pattern:"${machine.id.str}"}]}
+			//
+		}
+    /scoreboard players set @s place_machine 0
+  }
+}
+
+/execute as @e[tag=tick] at @s run $function 'tick' {
+	/execute if entity @s[tag=tech] run $function 'tech' {
+		/execute if entity @s[tag=cell] run $function 'cell_tick' {
+			/scoreboard players operation max global = @s rate
+			/execute at @e[tag=gen,distance=..10,scores={energy=1..}] run $function  {
+				/scoreboard players operation transfer_rate global = max global
+				/scoreboard players operation transfer_rate global < @e[$at_location] energy
+
+				/scoreboard players operation @e[$at_location] energy -= transfer_rate global
+				/scoreboard players operation @s energy += transfer_rate global
+				/scoreboard players operation max global -= transfer_rate global
+			}
+		}
+
+		for machine in machine_list  {
+			var string_id = machine.id.str;
+			if !machine.has_special_display  {
+				/execute if entity @s[tag=${string_id}] positioned ~ ~-0.5 ~ run $function 'display/${machine.id.str}' {
+					//title @a[distance=..1] actionbar
+					["",
+					{"translate":"mech_tech.$string_id.name","color":"gold","bold":true},
+					{"text":"Energy: ","color":"gold"},
+					{"score":{"name":"@s","objective":"energy"},"color":"red"}
+					]
+					//
+				}
+			}
+			var tickFun = machine?.tick;
+			if tickFun != null  {
+				/execute if entity @s[tag=$id] run $function 'mech_tech:tick/$id' {
+					tickFun();
+				}
+			}
+		}
+
+		/execute if block ~ ~-1 ~ air run $function 'delete' {
+	    for id in machine_list.map(machine -> machine.id.str)  {
+				/execute if entity @s[tag=$id] run function mech_tech:delete/$id
+	    }
+	    /kill @s
+		}
+	}
+}
